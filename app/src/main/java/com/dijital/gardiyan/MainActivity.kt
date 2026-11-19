@@ -26,7 +26,7 @@ class MainActivity : AppCompatActivity() {
         dpm = getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
         adminComponent = ComponentName(this, AdminReceiver::class.java)
 
-        // Pil Optimizasyon İzni İsteme (Canavar gibi çalışması için)
+        // Pil Optimizasyon İzni
         val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
         if (!pm.isIgnoringBatteryOptimizations(packageName)) {
             val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)
@@ -39,11 +39,24 @@ class MainActivity : AppCompatActivity() {
         val btnEnableAccessibility = findViewById<Button>(R.id.btnEnableAccessibility)
         val btnHideIcon = findViewById<Button>(R.id.btnHideIcon)
 
+        val prefs = getSharedPreferences("GardiyanPrefs", Context.MODE_PRIVATE)
+        var savedMasterPass = prefs.getString("masterPass", null)
+
         // Cihaz Yöneticisi Aktif mi?
         if (!dpm.isAdminActive(adminComponent)) {
             val intent = Intent(DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN)
             intent.putExtra(DevicePolicyManager.EXTRA_DEVICE_ADMIN, adminComponent)
             startActivity(intent)
+        }
+        
+        // Kaldırma Engellemesini Kontrol Et (Eğer Device Owner isek kaldır butonunu gizle)
+        try {
+            if (dpm.isDeviceOwnerApp(packageName)) {
+                dpm.setUninstallBlocked(adminComponent, packageName, true)
+                Toast.makeText(this, "Katı Mod Aktif: Uygulama sistem tarafından kilitlendi!", Toast.LENGTH_SHORT).show()
+            }
+        } catch (e: Exception) {
+            // Device Owner değilse hata verir, yoksay.
         }
 
         btnEnableAccessibility.setOnClickListener {
@@ -51,21 +64,42 @@ class MainActivity : AppCompatActivity() {
             Toast.makeText(this, "Gardiyan Servisini Açın!", Toast.LENGTH_LONG).show()
         }
 
-        btnToggleStrict.setOnClickListener {
-            val pass = etPassword.text.toString()
-            if (pass.isEmpty() || pass.length < 4) {
-                Toast.makeText(this, "En az 4 haneli şifre girin!", Toast.LENGTH_SHORT).show()
-                return@setOnClickListener
+        // Eğer daha önce şifre belirlenmemişse (İlk Kurulum Modu)
+        if (savedMasterPass == null) {
+            btnToggleStrict.text = "ŞİFREYİ BELİRLE VE BAŞLA"
+            
+            btnToggleStrict.setOnClickListener {
+                val pass = etPassword.text.toString()
+                if (pass.length < 4) {
+                    Toast.makeText(this, "En az 4 haneli bir şifre belirleyin!", Toast.LENGTH_SHORT).show()
+                } else {
+                    prefs.edit().putString("masterPass", pass).apply()
+                    Toast.makeText(this, "Yönetici Şifresi Kaydedildi!", Toast.LENGTH_LONG).show()
+                    recreate() // Ekranı yenile
+                }
             }
+            // Şifre belirlenene kadar diğer butonları kilitle
+            btnEnableAccessibility.isEnabled = false
+            btnHideIcon.isEnabled = false
             
-            // Basit bir mantıkla süreyi 1 saat sonrasına ayarlıyoruz (Geliştirilebilir)
-            val unlockTime = System.currentTimeMillis() + 3600000 // 1 Saat
+        } else {
+            // Şifre zaten belirlenmişse (Normal Kullanım Modu)
+            btnToggleStrict.text = "SIKI MODU AÇ (1 SAAT)"
             
-            val prefs = getSharedPreferences("GardiyanPrefs", Context.MODE_PRIVATE)
-            prefs.edit().putLong("unlockTime", unlockTime).putString("masterPass", pass).apply()
-            
-            Toast.makeText(this, "Sıkı Mod Aktif! 1 saat boyunca kilitler açılmaz.", Toast.LENGTH_LONG).show()
-            finishAffinity()
+            btnToggleStrict.setOnClickListener {
+                val pass = etPassword.text.toString()
+                if (pass != savedMasterPass) {
+                    Toast.makeText(this, "Hatalı Şifre!", Toast.LENGTH_SHORT).show()
+                    return@setOnClickListener
+                }
+                
+                // Süreyi 1 saat sonrasına ayarla
+                val unlockTime = System.currentTimeMillis() + 3600000
+                prefs.edit().putLong("unlockTime", unlockTime).apply()
+                
+                Toast.makeText(this, "Sıkı Mod Aktif! 1 saat boyunca kilitler açılmaz.", Toast.LENGTH_LONG).show()
+                finishAffinity()
+            }
         }
 
         // Simgeyi Gizleme
@@ -73,7 +107,6 @@ class MainActivity : AppCompatActivity() {
             val p = packageManager
             val componentName = ComponentName(this, MainActivity::class.java)
             
-            // Simgeyi gizle
             p.setComponentEnabledSetting(
                 componentName,
                 PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
