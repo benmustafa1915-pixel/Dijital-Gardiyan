@@ -9,6 +9,8 @@ import android.net.Uri
 import android.os.Bundle
 import android.os.PowerManager
 import android.provider.Settings
+import android.view.KeyEvent
+import android.view.inputmethod.EditorInfo
 import android.widget.Button
 import android.widget.EditText
 import android.widget.Toast
@@ -42,18 +44,10 @@ class MainActivity : AppCompatActivity() {
         val prefs = getSharedPreferences("GardiyanPrefs", Context.MODE_PRIVATE)
         var savedMasterPass = prefs.getString("masterPass", null)
 
-        // Cihaz Yöneticisi Aktif mi?
-        if (!dpm.isAdminActive(adminComponent)) {
-            val intent = Intent(DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN)
-            intent.putExtra(DevicePolicyManager.EXTRA_DEVICE_ADMIN, adminComponent)
-            startActivity(intent)
-        }
-        
-        // Kaldırma Engellemesini Kontrol Et (Eğer Device Owner isek kaldır butonunu gizle)
+        // Kaldırma Engellemesini Kontrol Et
         try {
             if (dpm.isDeviceOwnerApp(packageName)) {
                 dpm.setUninstallBlocked(adminComponent, packageName, true)
-                Toast.makeText(this, "Katı Mod Aktif: Uygulama sistem tarafından kilitlendi!", Toast.LENGTH_SHORT).show()
             }
         } catch (e: Exception) {
             // Device Owner değilse hata verir, yoksay.
@@ -64,9 +58,21 @@ class MainActivity : AppCompatActivity() {
             Toast.makeText(this, "Gardiyan Servisini Açın!", Toast.LENGTH_LONG).show()
         }
 
-        // Eğer daha önce şifre belirlenmemişse (İlk Kurulum Modu)
+        // --- KLAVYEDEKİ ENTER/BİTTİ TUŞUNU DİNLE ---
+        etPassword.setOnEditorActionListener { _, actionId, event ->
+            if (actionId == EditorInfo.IME_ACTION_DONE || 
+                (event != null && event.keyCode == KeyEvent.KEYCODE_ENTER && event.action == KeyEvent.ACTION_DOWN)) {
+                
+                btnToggleStrict.performClick() // Butona tıklanmış gibi yap
+                true
+            } else {
+                false
+            }
+        }
+
+        // İlk Kurulum veya Normal Kullanım Mantığı
         if (savedMasterPass == null) {
-            btnToggleStrict.text = "ŞİFREYİ BELİRLE VE BAŞLA"
+            btnToggleStrict.text = "ŞİFREYİ BELİRLE VE GİRİŞ YAP"
             
             btnToggleStrict.setOnClickListener {
                 val pass = etPassword.text.toString()
@@ -74,30 +80,27 @@ class MainActivity : AppCompatActivity() {
                     Toast.makeText(this, "En az 4 haneli bir şifre belirleyin!", Toast.LENGTH_SHORT).show()
                 } else {
                     prefs.edit().putString("masterPass", pass).apply()
-                    Toast.makeText(this, "Yönetici Şifresi Kaydedildi!", Toast.LENGTH_LONG).show()
+                    Toast.makeText(this, "Yönetici Şifresi Kaydedildi! Giriş yapıldı.", Toast.LENGTH_LONG).show()
                     recreate() // Ekranı yenile
                 }
             }
-            // Şifre belirlenene kadar diğer butonları kilitle
             btnEnableAccessibility.isEnabled = false
             btnHideIcon.isEnabled = false
             
         } else {
-            // Şifre zaten belirlenmişse (Normal Kullanım Modu)
             btnToggleStrict.text = "SIKI MODU AÇ (1 SAAT)"
             
             btnToggleStrict.setOnClickListener {
                 val pass = etPassword.text.toString()
                 if (pass != savedMasterPass) {
-                    Toast.makeText(this, "Hatalı Şifre!", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this, "Hatalı Şifre! Giriş yapılamadı.", Toast.LENGTH_SHORT).show()
                     return@setOnClickListener
                 }
                 
-                // Süreyi 1 saat sonrasına ayarla
                 val unlockTime = System.currentTimeMillis() + 3600000
                 prefs.edit().putLong("unlockTime", unlockTime).apply()
                 
-                Toast.makeText(this, "Sıkı Mod Aktif! 1 saat boyunca kilitler açılmaz.", Toast.LENGTH_LONG).show()
+                Toast.makeText(this, "Giriş Başarılı! Sıkı Mod Aktif. 1 saat boyunca kilitler açılmaz.", Toast.LENGTH_LONG).show()
                 finishAffinity()
             }
         }
